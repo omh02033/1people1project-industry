@@ -1,60 +1,134 @@
-import { useRef, useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Sounds } from '@/contants';
+import { Button, Hexile, Point } from '@/components';
+import {
+  Container,
+  KitText,
+  KitTextWrapper,
+  Line,
+  PointContainer,
+  PointWrapper,
+} from './style';
 
-const WIDTH = 400;
-const HEIGHT = 200;
+export const Main: React.FC = () => {
+  const [bpm, setBpm] = useState<number>(200);
+  const [beats, setBeats] = useState<number>(4);
+  const [words, setWords] = useState<number>(4);
+  const [activePoint, setActivePoint] = useState<{
+    [key: string]: Array<{
+      word: number;
+      beat: number;
+    }>;
+  }>(Sounds.reduce((prev, { label }) => ({ ...prev, [label]: [] }), {}));
+  const [nowPlaying, setNowPlaying] = useState<{
+    word: number;
+    beat: number;
+  }>({ word: -1, beat: -1 });
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const timer = useRef<NodeJS.Timer>();
 
-const draw = (analyzer: AnalyserNode, canvasContext: CanvasRenderingContext2D) => {
-  const dataArray = new Uint8Array(analyzer.frequencyBinCount);
-  analyzer.getByteFrequencyData(dataArray);
-  canvasContext.clearRect(0, 0, WIDTH, HEIGHT);
-  canvasContext.fillStyle = 'rgb(0, 255, 0)';
-  canvasContext.fillRect(0, 0, WIDTH, HEIGHT);
-  canvasContext.beginPath();
-  const sliceWidth = WIDTH * 1.0 / analyzer.frequencyBinCount;
-  let x = 0;
-  for (let i = 0; i < analyzer.frequencyBinCount; i++) {
-    const v = dataArray[i] / 128.0;
-    const y = v * HEIGHT / 2;
-    if (i === 0) {
-      canvasContext.moveTo(x, y);
+  const active = (label: string, beat: number, word: number) => {
+    if (
+      activePoint[label].findIndex(
+        (points) => points.word === word && points.beat === beat
+      ) === -1
+    ) {
+      setActivePoint((prev) => {
+        if (prev[label]) {
+          return {
+            ...prev,
+            [label]: [...prev[label], { beat, word }],
+          };
+        } else {
+          prev[label] = [{ beat, word }];
+          return prev;
+        }
+      });
     } else {
-      canvasContext.lineTo(x, y);
+      setActivePoint((prev) => {
+        prev[label].splice(
+          prev[label].findIndex(
+            (points) => points.word === word && points.beat === beat
+          ),
+          1
+        );
+        return prev;
+      });
     }
-    x += sliceWidth;
-  }
-  canvasContext.lineTo(WIDTH, HEIGHT / 2);
-  canvasContext.stroke();
-  requestAnimationFrame(() => draw(analyzer, canvasContext));
-};
-
-export const Main = () => {
-  const [canvasContext, setCanvasContext] = useState<CanvasRenderingContext2D | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  };
 
   useEffect(() => {
-    const audioContext = new AudioContext();
-    const analyzer = audioContext.createAnalyser();
-    navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
-      const source = audioContext.createMediaStreamSource(stream);
-      source.connect(analyzer);
-      analyzer.connect(audioContext.destination);
-
-      const canvas = canvasRef.current;
-      const canvasContext = canvas?.getContext('2d');
-      if (canvasContext) {
-        setCanvasContext(canvasContext);
-        canvasContext.fillStyle = 'rgb(0, 0, 0)';
-        canvasContext.fillRect(0, 0, WIDTH, HEIGHT);
-        draw(analyzer, canvasContext);
-      }
-    });
-  }, []);
+    if (isPlaying) {
+      setNowPlaying({ word: 0, beat: 0 });
+      timer.current = setInterval(() => {
+        setNowPlaying((prev) => ({
+          word:
+            prev.word === words - 1 && prev.beat === beats - 1
+              ? 0
+              : prev.beat === beats - 1
+              ? prev.word + 1
+              : prev.word,
+          beat:
+            (prev.word === words - 1 && prev.beat === beats - 1) ||
+            prev.beat === beats - 1
+              ? 0
+              : prev.beat + 1,
+        }));
+      }, (60 / bpm) * 1000);
+      return () => {
+        clearInterval(timer.current);
+      };
+    } else {
+      setNowPlaying({ word: -1, beat: -1 });
+      clearTimeout(timer.current);
+    }
+  }, [isPlaying]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={WIDTH}
-      height={HEIGHT}
-    />
+    <Container fillx filly y="center" x="center">
+      <Hexile gap={3} fillx x="right" y="center">
+        <KitTextWrapper y='center'>
+          {Sounds.map(({ label }, idx) => (
+            <KitText key={`t${idx}`}>{label}</KitText>
+          ))}
+        </KitTextWrapper>
+        <PointContainer>
+          {Sounds.map(({ label, mp3 }, idx) => (
+            <PointWrapper gap={2} y='center' key={`sound${idx}`}>
+              {new Array(words)
+                .fill(null)
+                .map((_, wordIdx) =>
+                  <React.Fragment key={`box${idx}${wordIdx}`}>
+                    {new Array(beats)
+                      .fill(null)
+                      .map((_, beatIdx) => (
+                        <Point
+                          active={
+                            activePoint[label].findIndex(
+                              (points) =>
+                                points.word === wordIdx && points.beat === beatIdx
+                            ) !== -1
+                          }
+                          mp3={mp3}
+                          playing={
+                            nowPlaying.word === wordIdx &&
+                            nowPlaying.beat === beatIdx
+                          }
+                          key={`${idx}${wordIdx}${beatIdx}`}
+                          onClick={() => active(label, beatIdx, wordIdx)}
+                        />
+                      ))}
+                      <Line filly key={`line${idx}${wordIdx}`} />
+                  </React.Fragment>
+                )}
+            </PointWrapper>
+          ))}
+        </PointContainer>
+      </Hexile>
+      <Button
+        onClick={() => setIsPlaying(!isPlaying)}
+        text={isPlaying ? 'STOP' : 'START'}
+      />
+    </Container>
   );
 };
